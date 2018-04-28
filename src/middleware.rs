@@ -110,7 +110,7 @@ impl Middleware for HandlebarsEngine {
                             TemplateRenderError::from,
                         ))
                     } else if let Some(ref content) = h.content {
-                        Some(hbs.template_render(content, &h.value))
+                        Some(hbs.render_template(content, &h.value))
                     } else {
                         None
                     };
