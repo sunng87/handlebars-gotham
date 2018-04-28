@@ -1,13 +1,13 @@
 extern crate gotham;
 extern crate handlebars_gotham as hbs;
 extern crate hyper;
-extern crate serde;
-extern crate serde_json;
-#[macro_use]
-extern crate serde_derive;
 #[macro_use]
 extern crate maplit;
 extern crate mime;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
 
 use gotham::state::State;
 use gotham::http::response::create_response;
@@ -15,10 +15,10 @@ use gotham::pipeline::new_pipeline;
 use gotham::pipeline::single::single_pipeline;
 use gotham::router::builder::*;
 
-use hbs::{Template, HandlebarsEngine, DirectorySource, MemorySource};
-use hbs::handlebars::{Handlebars, RenderContext, RenderError, Helper, to_json};
+use hbs::{DirectorySource, HandlebarsEngine, MemorySource, Template};
+use hbs::handlebars::{to_json, Handlebars, Helper, RenderContext, RenderError};
 use hyper::{Response, StatusCode};
-use serde_json::value::{Value, Map};
+use serde_json::value::{Map, Value};
 
 #[derive(Serialize, Debug)]
 pub struct Team {
@@ -93,18 +93,13 @@ fn plain(state: State) -> (State, Response) {
     (state, res)
 }
 
-
-
 fn main() {
-    let mem_templates =
-        btreemap! {
-            "memory".to_owned() => include_str!("templates/some/path/hello.hbs").to_owned()
-        };
+    let mem_templates = btreemap! {
+        "memory".to_owned() => include_str!("templates/some/path/hello.hbs").to_owned()
+    };
 
     let hbse = HandlebarsEngine::new(vec![
-        Box::new(
-            DirectorySource::new("./examples/templates/", ".hbs")
-        ),
+        Box::new(DirectorySource::new("./examples/templates/", ".hbs")),
         Box::new(MemorySource(mem_templates)),
     ]);
 
@@ -115,12 +110,11 @@ fn main() {
 
     hbse.handlebars_mut().register_helper(
         "some_helper",
-        Box::new(|_: &Helper,
-         _: &Handlebars,
-         _: &mut RenderContext|
-         -> Result<(), RenderError> {
-            Ok(())
-        }),
+        Box::new(
+            |_: &Helper, _: &Handlebars, _: &mut RenderContext| -> Result<(), RenderError> {
+                Ok(())
+            },
+        ),
     );
 
     let (chain, pipelines) = single_pipeline(new_pipeline().add(hbse).build());

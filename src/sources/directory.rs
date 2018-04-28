@@ -1,10 +1,10 @@
 use std::path::PathBuf;
-use std::ffi::{OsString, OsStr};
+use std::ffi::{OsStr, OsString};
 
 use sources::{Source, SourceError};
 
 use handlebars::Handlebars;
-use walkdir::{WalkDir, DirEntry};
+use walkdir::{DirEntry, WalkDir};
 
 pub struct DirectorySource {
     pub prefix: OsString,
@@ -28,12 +28,12 @@ fn filter_file(entry: &DirEntry, suffix: &OsStr) -> bool {
     let path = entry.path();
 
     // ignore hidden files, emacs buffers and files with wrong suffix
-    !path.is_file() ||
-        path.file_name()
+    !path.is_file()
+        || path.file_name()
             .map(|s| {
                 let ds = s.to_string_lossy();
-                ds.starts_with(".") || ds.starts_with("#") ||
-                    !ds.ends_with(suffix.to_string_lossy().as_ref())
+                ds.starts_with(".") || ds.starts_with("#")
+                    || !ds.ends_with(suffix.to_string_lossy().as_ref())
             })
             .unwrap_or(true)
 }
@@ -53,9 +53,7 @@ impl Source for DirectorySource {
         for p in walker
             .min_depth(1)
             .into_iter()
-            .filter(|e| {
-                e.is_ok() && !filter_file(e.as_ref().unwrap(), &self.suffix)
-            })
+            .filter(|e| e.is_ok() && !filter_file(e.as_ref().unwrap(), &self.suffix))
             .map(|e| e.unwrap())
         {
             let tpl_path = p.path();

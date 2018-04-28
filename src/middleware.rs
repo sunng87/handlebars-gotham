@@ -1,8 +1,8 @@
-use std::sync::{RwLock, RwLockWriteGuard, Arc};
+use std::sync::{Arc, RwLock, RwLockWriteGuard};
 use std::io;
 use std::panic::RefUnwindSafe;
 
-use handlebars::{Handlebars, TemplateRenderError, to_json};
+use handlebars::{to_json, Handlebars, TemplateRenderError};
 
 use gotham::handler::HandlerFuture;
 use gotham::state::State;
@@ -101,38 +101,38 @@ impl Middleware for HandlebarsEngine {
     where
         Chain: FnOnce(State) -> Box<HandlerFuture>,
     {
-        let f = chain(state)
-            .and_then(move |(state, mut response)| {
-                if let Some(h) = state.try_borrow::<Template>() {
-                    let hbs = self.registry.read().unwrap();
-                    let page_wrapper = if let Some(ref name) = h.name {
-                        Some(hbs.render(name, &h.value).map_err(
-                            TemplateRenderError::from,
-                        ))
-                    } else if let Some(ref content) = h.content {
-                        Some(hbs.render_template(content, &h.value))
-                    } else {
-                        None
-                    };
+        let f = chain(state).and_then(move |(state, mut response)| {
+            if let Some(h) = state.try_borrow::<Template>() {
+                let hbs = self.registry.read().unwrap();
+                let page_wrapper = if let Some(ref name) = h.name {
+                    Some(
+                        hbs.render(name, &h.value)
+                            .map_err(TemplateRenderError::from),
+                    )
+                } else if let Some(ref content) = h.content {
+                    Some(hbs.render_template(content, &h.value))
+                } else {
+                    None
+                };
 
-                    if let Some(page_result) = page_wrapper {
-                        match page_result {
-                            Ok(page) => {
-                                response::extend_response(
-                                    &state,
-                                    &mut response,
-                                    StatusCode::Ok,
-                                    Some((page.into_bytes(), mime::TEXT_HTML)),
-                                );
-                            }
-                            Err(_) => {
-                                //TODO
-                            }
+                if let Some(page_result) = page_wrapper {
+                    match page_result {
+                        Ok(page) => {
+                            response::extend_response(
+                                &state,
+                                &mut response,
+                                StatusCode::Ok,
+                                Some((page.into_bytes(), mime::TEXT_HTML)),
+                            );
+                        }
+                        Err(_) => {
+                            //TODO
                         }
                     }
                 }
-                future::ok((state, response))
-            });
+            }
+            future::ok((state, response))
+        });
         Box::new(f)
     }
 }
