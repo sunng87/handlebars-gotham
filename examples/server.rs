@@ -11,23 +11,13 @@ extern crate mime;
 
 use gotham::state::State;
 use gotham::http::response::create_response;
-use gotham::handler::{NewHandlerService, NewHandler};
-use gotham::middleware::pipeline::new_pipeline;
-use gotham::router::Router;
-use gotham::router::route::{Extractors, Route, RouteImpl, Delegation};
-use gotham::router::route::dispatch::{new_pipeline_set, finalize_pipeline_set, PipelineSet,
-                                      PipelineHandleChain, DispatcherImpl};
-use gotham::router::route::matcher::MethodOnlyRouteMatcher;
-use gotham::router::request::path::NoopPathExtractor;
-use gotham::router::request::query_string::NoopQueryStringExtractor;
-use gotham::router::response::finalizer::ResponseFinalizerBuilder;
-use gotham::router::tree::TreeBuilder;
-use gotham::router::tree::node::{NodeBuilder, SegmentType};
+use gotham::pipeline::new_pipeline;
+use gotham::pipeline::single::single_pipeline;
+use gotham::router::builder::*;
 
 use hbs::{Template, HandlebarsEngine, DirectorySource, MemorySource};
 use hbs::handlebars::{Handlebars, RenderContext, RenderError, Helper, to_json};
-use hyper::server::Http;
-use hyper::{Method, Request, Response, StatusCode};
+use hyper::{Response, StatusCode};
 use serde_json::value::{Value, Map};
 
 #[derive(Serialize, Debug)]
@@ -66,7 +56,7 @@ pub fn make_data() -> Map<String, Value> {
 }
 
 /// the handlers
-fn index(mut state: State, _req: Request) -> (State, Response) {
+fn index(mut state: State) -> (State, Response) {
     state.put(Template::new("some/path/hello", make_data()));
 
     let res = create_response(&state, StatusCode::Ok, None);
@@ -74,7 +64,7 @@ fn index(mut state: State, _req: Request) -> (State, Response) {
     (state, res)
 }
 
-fn memory(mut state: State, _req: Request) -> (State, Response) {
+fn memory(mut state: State) -> (State, Response) {
     state.put(Template::new("memory", make_data()));
 
     let res = create_response(&state, StatusCode::Ok, None);
@@ -82,7 +72,7 @@ fn memory(mut state: State, _req: Request) -> (State, Response) {
     (state, res)
 }
 
-fn temp(mut state: State, _req: Request) -> (State, Response) {
+fn temp(mut state: State) -> (State, Response) {
     state.put(Template::with(
         include_str!("templates/some/path/hello.hbs"),
         make_data(),
@@ -93,7 +83,7 @@ fn temp(mut state: State, _req: Request) -> (State, Response) {
     (state, res)
 }
 
-fn plain(state: State, _req: Request) -> (State, Response) {
+fn plain(state: State) -> (State, Response) {
     let res = create_response(
         &state,
         StatusCode::Ok,
@@ -133,95 +123,17 @@ fn main() {
         }),
     );
 
-    // -________________________- start
-    let mut tree_builder = TreeBuilder::new();
-    let ps_builder = new_pipeline_set();
-    let (ps_builder, global) = ps_builder.add(new_pipeline().add(hbse).build());
-    let ps = finalize_pipeline_set(ps_builder);
+    let (chain, pipelines) = single_pipeline(new_pipeline().add(hbse).build());
 
-    tree_builder.add_route(static_route(
-        vec![Method::Get],
-        || Ok(index),
-        (global, ()),
-        ps.clone(),
-    ));
+    let router = build_router(chain, pipelines, |route| {
+        route.get("/").to(index);
+        route.get("/memory").to(memory);
+        route.get("/temp").to(temp);
+        route.get("/plain").to(plain);
+    });
 
-    let mut memory_handler = NodeBuilder::new("memory", SegmentType::Static);
-    memory_handler.add_route(static_route(
-        vec![Method::Get],
-        || Ok(memory),
-        (global, ()),
-        ps.clone(),
-    ));
-    tree_builder.add_child(memory_handler);
+    let addr = "127.0.0.1:7878";
 
-    let mut temp_handler = NodeBuilder::new("temp", SegmentType::Static);
-    temp_handler.add_route(static_route(
-        vec![Method::Get],
-        || Ok(temp),
-        (global, ()),
-        ps.clone(),
-    ));
-    tree_builder.add_child(temp_handler);
-
-    let mut plain_handler = NodeBuilder::new("plain", SegmentType::Static);
-    plain_handler.add_route(static_route(
-        vec![Method::Get],
-        || Ok(plain),
-        (global, ()),
-        ps.clone(),
-    ));
-    tree_builder.add_child(plain_handler);
-    let tree = tree_builder.finalize();
-
-    let response_finalizer_builder = ResponseFinalizerBuilder::new();
-    let response_finalizer = response_finalizer_builder.finalize();
-    let router = Router::new(tree, response_finalizer);
-    // -____________________________- end
-
-    let addr = "127.0.0.1:7878".parse().unwrap();
-
-    let server = Http::new()
-        .bind(&addr, NewHandlerService::new(router))
-        .unwrap();
-
-    println!("Listening on http://{}", server.local_addr().unwrap());
-    server.run().unwrap();
+    println!("Listening on http://{}", addr);
+    gotham::start(addr, router);
 }
-
-// router copied from gotham example
-fn static_route<NH, P, C>(
-    methods: Vec<Method>,
-    new_handler: NH,
-    active_pipelines: C,
-    ps: PipelineSet<P>,
-) -> Box<Route + Send + Sync>
-where
-    NH: NewHandler + 'static,
-    C: PipelineHandleChain<P> + Send + Sync + 'static,
-    P: Send + Sync + 'static,
-{
-    // Requests must have used the specified method(s) in order for this Route to match.
-    //
-    // You could define your on RouteMatcher of course.. perhaps you'd like to only match on
-    // requests that are made using the GET method and send a User-Agent header for a particular
-    // version of browser you'd like to make fun of....
-    let matcher = MethodOnlyRouteMatcher::new(methods);
-
-    // For Requests that match this Route we'll dispatch them to new_handler via the pipelines
-    // defined in active_pipelines.
-    //
-    // n.b. We also specify the set of all known pipelines in the application so the dispatcher can
-    // resolve the pipeline references provided in active_pipelines. For this application that is
-    // only the global pipeline.
-    let dispatcher = DispatcherImpl::new(new_handler, active_pipelines, ps);
-    let extractors: Extractors<NoopPathExtractor, NoopQueryStringExtractor> = Extractors::new();
-    let route = RouteImpl::new(
-        matcher,
-        Box::new(dispatcher),
-        extractors,
-        Delegation::Internal,
-    );
-    Box::new(route)
-}
-//
